@@ -1,0 +1,42 @@
+---
+title: "Capstone Project Proposal"
+author: "Lisa Ang"
+date: "May 13, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Histological evaluation of a biopsy sample by a trained pathologist has long been the gold standard for diagnosis of cancer and this crucial step often enables the elucidation of etiology, pathogenesis and prognostication.^1^ However, the subjective and qualitative nature of this process has often resulted in considerable inter- and intravariability between pathologists,^2^ leading to an inconsistency in diagnoses that can affect treatment choices and patient outcomes. With the rapid acceleration in medical imaging technology, there is increasing interest in the use of computerized methods of analysis and diagnosis to maximise the reliability and efficiency of histopathological evaluation. 
+
+One of the most commonly performed analyses of tissue biopsy samples is the determination of tumour malignancy. The earlier a malignant tumour is identified, the greater the chances are for successful treatment. Therefore, an algorithm that can successfully detect or predict malignancy earlier and more reliably than current manual methods will be of great benefit to pathologists when making diagnostic decisions, and subsequently, improve patient outcomes.
+
+## Data set
+
+A suitable data set for predictive analysis of malignancy is the “Breast Cancer Wisconsin (Diagnostic)” data set, which is publicly available on [Kaggle.com](www.kaggle.com). This data set describes various characteristics of the numerous cell nuclei present in a digitized image of a fine-needle aspirate of a breast mass from 357 benign and 212 malignant samples.
+
+These attributes include:  
+1) ID number 
+2) Diagnosis (M = malignant, B = benign) 
+3-32) Ten real-valued features are computed for each cell nucleus: a) radius (mean of distances from center to points on the perimeter) b) texture (standard deviation of gray-scale values) c) perimeter d) area e) smoothness (local variation in radius lengths) f) compactness (perimeter^2^ / area - 1.0) g) concavity (severity of concave portions of the contour) h) concave points (number of concave portions of the contour) i) symmetry j) fractal dimension ("coastline approximation" - 1)
+The mean, standard error and largest (mean of the three largest values) of these features were computed for each image, resulting in 30 features per image.
+
+## Analysis strategy and deliverables
+
+The data shall be cleaned and prepared for exploration, and subsequently divided into a test set and a training set. The training set will be used to build a tree-based learning algorithm that can be used to predict malignancy from a digitized image of breast mass. This will be evaluated using the test set. Accompanying the code for the algorithm will be a technical paper describing the methods used and an evaluation of the model(s) generated, as well as a slide deck presenting the analysis for an appropriate audience.
+
+## References
+
+1. Leong AS-Y, Zhuang Z. The Changing Role of Pathology in Breast Cancer Diagnosis and Treatment. *Pathobiology*. 2011;78(2):99-114. 
+2. Robbins P, Pinder S, de Klerk N, Dawkins H, Harvey J, Sterrett G, Ellis I, Elston C. Histological grading of breast carcinomas: a study of interobserver agreement. *Hum Pathol.* 1995 Aug;26(8):873-9.
+
+
+
+
+
+
+
