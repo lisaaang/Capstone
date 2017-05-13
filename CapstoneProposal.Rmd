@@ -6,9 +6,9 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 ```
-
+### Capstone Project Proposal
 ## Background
 
 Histological evaluation of a biopsy sample by a trained pathologist has long been the gold standard for diagnosis of cancer and this crucial step often enables the elucidation of etiology, pathogenesis and prognostication.^1^ However, the subjective and qualitative nature of this process has often resulted in considerable inter- and intravariability between pathologists,^2^ leading to an inconsistency in diagnoses that can affect treatment choices and patient outcomes. With the rapid acceleration in medical imaging technology, there is increasing interest in the use of computerized methods of analysis and diagnosis to maximise the reliability and efficiency of histopathological evaluation. 
