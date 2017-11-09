@@ -1,0 +1,27 @@
+---
+title: "Capstone Project Proposal"
+author: "Lisa Ang"
+date: "November 8, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Capstone Project: Improving Insurance Claims Management
+
+While the concept of shared risk management has a long and notable history in many cultures around the world, the specialized varieties of modern insurance practiced today developed in Europe during the 17th and 18th century with the Age of Enlightenment. Managed prudently, insurance products can play very important roles in society at all levels, from individuals and corporate entities to government. It can enable economic development through the underwriting of trade, while also serving to provide peace of mind to average citizens through collective protection against hazards such as flooding, fire and medical emergencies, or the risks of performing routine activities like driving a vehicle or travel. 
+
+From the standpoint of an insurer, claims management is one of the most critical aspects of a functioning insurance provider. To be successful in today's highly competitive economic environment, the insurer must develop a consistent operating model that can balance claim costs with optimal risk management and client satisfaction, while eliminating unnecessary expenses associated with claims handling. A large part of this involves maximizing the efficiency of the claims process and reducing the need for manual evaluation of claims. Although the execution of claims handling is necessarily highly customized from industry to industry, most elements are quite similar when broken down into their core processes. When combined with a well-designed case management platform, this makes many aspects of claims handling excellent candidates for automation. 
+
+For many types of insurance, some claims can be approved with minimal involvement quite early in the claims process but others will require additional information to be obtained prior to approval. Identifying the claims that can be approved quickly is an effective means of streamlining the claims process. This not only reduces costs but leads to greater customer satisfaction and is therefore of great importance to the insurer.
+
+BNP Paribas Cardif is an international insurance company specializing in personal insurance coverage with over 90 million clients in 36 countries across Europe, Asia and Latin America. The insurance claims they receive can vary widely in complexity as well as the levels of verification required before a claim can be approved and payment issued. BNP Paribas Cardif has provided an anonymized database with two types of claims containing data available upon receipt of a claim:
+
+1.	Claims which meet requirements for accelerated approval and faster payments
+2.	Claims for which additional information is required before approval can be given and payment issued
+
+The aim is to determine which claims can be selected for accelerated approval. The database is provided in the form of two anonymized datasets (train.csv and test.csv) for a competition on Kaggle. The goal for the analysis is to use the training set to generate model(s) that will predict a probability for each claim in the test set for accelerated approval. The accuracy of the prediction will be evaluated by submission on the [Kaggle](https://www.kaggle.com/c/bnp-paribas-cardif-claims-management) website and scored by log loss ranking.
+
+Accompanying the code for the model(s) will be a technical paper describing the methods used and an evaluation of the model(s) generated, as well as a slide deck presenting the analysis for an appropriate audience.
