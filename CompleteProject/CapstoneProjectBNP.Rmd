@@ -1,0 +1,884 @@
+---
+title: 'Capstone Project: Improving Insurance Claims Management. Accelerating claims approval for BNP Paribas Cardif'
+author: "Lisa Ang"
+date: "Oct 31, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#Explore the BNP Paribas Training data set
+
+The BNP Paribas data set (train.csv and test.csv) comprises anonymized information on insurance claims. The "target" column is the dependent variable to be predicted, where:
+
+1 = Claims suitable for accelerated approval
+0 = Claims requiring additional information for approval
+
+The goal is to predict a probability for each claim in the provided test set that the claim is suitable for accelerated approval.
+
+All string type variables are categorical and there are no ordinal variables. 
+
+To start: 
+0. Set working directory 
+1. Load packages:
+```{r}
+#0.Set working directory
+#setwd("~/Springboard/R/Capstone/BNP Paribas")
+
+#1.Load packages
+library(ggplot2)
+library(scales)
+library(gridExtra)
+library(smbinning)
+library(dplyr)
+library(caTools)
+library(Information)
+library(reshape2)
+library(woe)
+library(rpart)
+library(woeBinning)
+library(ROCR)
+library(caret)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(doSNOW)
+library(Amelia)
+library(effects)
+
+```
+
+2.  Read in the training and test data. 
+    View structure and summary of data.
+    train.csv gives a dataframe of 114321 obs. of 133 variables, with target as the dependent variable.
+    test.csv gives a dataframe of 114393 obs. of  132 variables, without target.
+    There are many missing values.
+
+3a. Check if any rows are entirely missing -> No, there aren't any. 
+3b. Count the number of categorical variables (factors) -> There are 19 factors
+
+4.  Determine if training set is balanced with respect to the dependent variable
+    Training data is modestly imbalanced with a 1:3 ratio of 0:1
+
+5.  Split training set 50:50 into training and validation sets. Use seed 181818.  
+    trainClaims has 57160 observations of 133 variables.
+    valClaims has 57161 observations of 133 variables.
+
+```{r}
+
+#2. Read in data from both train and test
+claims <- read.csv("train.csv")
+testClaims <- read.csv("test.csv")
+
+#   View structure and summary of data set
+#   uncomment to run
+
+# str(claims)
+# str(testClaims)
+# summary(claims)
+# summary(testClaims)
+
+
+#3a. Check if any rows are entirely missing
+
+count(claims)
+claims[apply(claims,1,function(x)any(!is.na(x))),]
+count(claims)
+
+
+#3b. Check number of categorical variables
+factorCount <- 0
+
+for (i in 3:ncol(claims)){
+  if (class(claims[,i]) =="factor"){  #check is the column a factor?
+    factorCount <- factorCount + 1 #add column number to factorColNums
+  }
+}
+
+cat("There are", factorCount, "factors. ")
+
+#4. Determine if training data is balanced with respect to the dependent variable "target".
+#   Plot the number of 1 and o
+
+count1 <- length(which(claims$target == 1))
+count0 <- length(which(claims$target == 0))
+cat("Count of 1:", count1, " ")
+cat("Count of 0:", count0, " ")
+cat("Ratio of 1:0 is", count1/count0)
+
+
+ggplot(claims, aes(x = target)) + geom_bar() + scale_x_continuous(breaks=seq(0, 1, 1))
+
+```
+#Partition training data into training and validation sets
+Split 50:50 while maintaining ratio of target column
+
+```{r}
+
+#5.  Split claims 50:50 into trainClaims and valClaims 
+
+set.seed(181818)
+split <- sample.split(claims$target, SplitRatio = 0.5)
+
+trainClaims <- subset(claims, split == TRUE)
+valClaims <- subset(claims, split == FALSE)
+
+
+```
+
+#Clean up the data
+For training set (trainClaims):
+- 6a. Plot missing values vs observed values
+- 6b. Check percentage missing values for each variable. 
+- 6c. Remove all variables with > 25% missing values.
+- 6d. Remove ID column from training, save target column to a vector called trainClaimsTargets
+
+For validation set (valClaims):
+- 6c. Remove same variables from the validation set
+- 6d. Remove ID column from validation set, save target column to a vector called valClaimsTargets
+
+For test set (testClaims):
+- 6c. Remove the same variables from the test set
+- 6e. Save ID numbers to a vector called testClaimsID
+
+This reduces the training set to 57160 observations of 32 variables including target. The same columns were removed from the validation and test sets.
+
+
+```{r}
+
+#6a.Plot missing values using missmap function from Amelia package 
+#   NOTE: This can take a long time. Save .rmd file before exporting image
+missmap(trainClaims, main = "Missing Values vs Observed Values")
+
+
+#6b. Check percent missing values for each variable
+missingPctNum <- data.frame(apply(trainClaims[,-c(1,2)], 2, function(col)sum(is.na(col))/length(col)))
+names(missingPctNum) <- c("missingPct")
+missingPctNum$name <- row.names(missingPctNum)
+
+#6c. Remove columns with >=25% NA from training set
+missingRemove <- missingPctNum[which(missingPctNum$missingPct >= 0.25),c("name")]
+
+trainClaims <- trainClaims[,!(names(trainClaims) %in% unlist(missingRemove, recursive = TRUE, use.names = TRUE))]
+#remove same columns from validation set
+valClaims <- valClaims[,!(names(valClaims) %in% unlist(missingRemove, recursive = TRUE, use.names = TRUE))]
+#remove same columns from test set
+testClaims <- testClaims[,!(names(testClaims) %in% unlist(missingRemove, recursive = TRUE, use.names = TRUE))]
+
+#View structure of trainClaims, valClaims and testClaims again
+str(trainClaims)
+str(valClaims)
+str(testClaims)
+
+#6d.Remove ID column from training and validations sets, save target column in a vector
+trainClaims[,1] <- NULL
+valClaims[,1] <- NULL
+
+trainClaimsTargets <- trainClaims[,1]
+valClaimsTargets <- valClaims[,1]
+
+#6e. Save ID numbers in a vector
+testClaimsID <- testClaims[,1]
+
+
+```
+#Cleaning up categorical variables: 
+
+7. Create a dataframe of categorical variables in training data 
+   Store this information in catTrainClaims, catValClaims and catTestClaims
+
+
+
+```{r}
+
+#7. Make a dataframe of categorical variables in training, validation and test data called catTrainClaims, catValClaims, catTestClaims
+
+#7a. Initialize a vector to hold column numbers of all factors in claims, then iterate through claims
+factorColNums <- c(1)
+
+for (i in 2:ncol(trainClaims)){
+  if (class(trainClaims[,i]) =="factor"){  #check is the column a factor?
+    factorColNums <- c(factorColNums, as.integer(i)) #add column number to factorColNums
+  }
+}
+
+#7b. Make factorColNums a vector of integers
+factorColNums <- as.integer(factorColNums)
+
+#7c. Use select function from dplyr package to choose all categorical variables from trainClaims, valClaims and testClaims
+catTrainClaims <- trainClaims %>% select(factorColNums) #incl target
+catValClaims <- valClaims %>% select(factorColNums) #incl target
+catTestClaims <- testClaims %>% select(factorColNums) #incl ID
+
+#7d. View catTrainClaims, catValClaims and catTestClaims
+str(catTrainClaims)
+str(catValClaims)
+str(catTestClaims)
+
+```
+8. Determine how many levels for each factor in catTrainClaims
+   Store this information in countLevels
+
+```{r}
+#8a. Print out levels and number of levels for each categorical variable in catClaims
+
+catLevels <- list() #Make a list of level counts + level names
+columnNames <- c()
+NumLevelsVector <- c()
+
+for (i in 2:length(catTrainClaims)){
+  NumLevels <- length(sapply(catTrainClaims[i], levels))
+  LevelNames <- sapply(catTrainClaims[i], levels)
+  categorical <- list(NumLevels, LevelNames)
+  catLevels[[i]] <- categorical
+  
+  columnNames[i] <- colnames(catTrainClaims[i])
+  NumLevelsVector[i] <- NumLevels
+  
+}
+
+countLevels <- data.frame(Column = columnNames, Levels = NumLevelsVector)
+print(countLevels)
+
+```
+9. Remove categorical variables with > 15 levels.   
+   Store this information in trainClaimsCat15, valClaimsCat15 and testClaimsCat15
+   This results in 13 remaining categorical variables: v3, v24, v30, v31, v47, v52, v66, v71, v74, v75, v91, v107, v110
+
+```{r}
+
+#9a. Remove variables with > 15 levels from catClaims. Name this claimsCategorical15.
+countLevels15 <- filter(countLevels, Levels <= 15)
+columnNames15 <- as.character(countLevels15$Column)
+trainClaimsCat15 <- catTrainClaims[, columnNames15] #does not incl target yet
+
+#9b. Remove same variables from catValClaims and catTestClaims. Name these valClaimsCat15 and testClaimsCat15
+valClaimsCat15 <- catValClaims[, columnNames15] #does not incl target yet
+testClaimsCat15 <- catTestClaims[, columnNames15] #does not incl ID yet
+
+#9c. View trainClaimsCat15 valClaimsCat15 testClaimsCat15. 
+#NOTE that they do not have target and ID columns yet.
+str(trainClaimsCat15)
+str(valClaimsCat15)
+str(testClaimsCat15)
+
+
+
+```
+How to deal with the many missing values for remaining categorical values?
+ 
+For categorical variables with <=5% missing values, replace NA with most common level.
+For variables with >5% (and < 25%) missing values, replace NA with "missing" ie. new level
+
+10a. trainClaimsCat15: Replace all "" with "missing" first
+10b. trainClaimsCat15: If missing <=5% replace with most common level
+10c and d. Repeat for categorical variables in valClaimsCat15 and testClaimsCat15
+
+
+```{r}
+
+#10a. Replace all "" with "missing"
+for (i in 1:ncol(trainClaimsCat15)){
+  if (levels(trainClaimsCat15[,i])[1] == ""){     #this replaces blanks with "missing"
+    levels(trainClaimsCat15[,i])[1] <- "missing"
+  }
+}
+
+#10b. If "missing" <=5% replace with most common level
+for (i in 1:ncol(trainClaimsCat15)){
+  myFactor <- trainClaimsCat15[i]
+  myTable <- table(myFactor)
+  
+  if (any(myFactor == "missing")){ #if there are missing values
+    #check if number missing is <=5%
+    numMissing <- myTable[[1]]
+    if (numMissing <= (0.05*nrow(trainClaimsCat15))){
+      #find most common level
+      mostCommon <- names(myTable[which.max(myTable)])
+      #replace missing with mostCommon
+      if (levels(trainClaimsCat15[,i])[1] == "missing"){
+        levels(trainClaimsCat15[,i])[1] <- mostCommon
+      }
+    }
+        
+  }
+      
+}
+
+
+    
+#10c. Repeat for categorical variables in valClaimsCat15 and testClaimsCat15. 
+#     Replace all "" with "missing"
+
+for (i in 1:ncol(valClaimsCat15)){
+  if (levels(valClaimsCat15[,i])[1] == ""){     #this replaces blanks with "missing"
+    levels(valClaimsCat15[,i])[1] <- "missing"
+  }
+}
+
+for (i in 1:ncol(testClaimsCat15)){
+  if (levels(testClaimsCat15[,i])[1] == ""){     #this replaces blanks with "missing"
+    levels(testClaimsCat15[,i])[1] <- "missing"
+  }
+}
+
+
+#10d. In valClaimsCat15 and testClaimsCat15, if missing <=5% replace with most common level
+for (i in 1:ncol(valClaimsCat15)){
+  myFactor <- valClaimsCat15[i]
+  myTable <- table(myFactor)
+  
+  if (any(myFactor == "missing")){ #if there are missing values
+    #check if number missing is <=5%
+    numMissing <- myTable[[1]]
+    if (numMissing <= (0.05*nrow(valClaimsCat15))){
+      #find most common level
+      mostCommon <- names(myTable[which.max(myTable)])
+      #replace missing with mostCommon
+      if (levels(valClaimsCat15[,i])[1] == "missing"){
+        levels(valClaimsCat15[,i])[1] <- mostCommon
+      }
+    }
+  }
+}
+
+for (i in 1:ncol(testClaimsCat15)){
+  myFactor <- testClaimsCat15[i]
+  myTable <- table(myFactor)
+  
+  if (any(myFactor == "missing")){ #if there are missing values
+    #check if number missing is <=5%
+    numMissing <- myTable[[1]]
+    if (numMissing <= (0.05*nrow(testClaimsCat15))){
+      #find most common level
+      mostCommon <- names(myTable[which.max(myTable)])
+      #replace missing with mostCommon
+      if (levels(testClaimsCat15[,i])[1] == "missing"){
+        levels(testClaimsCat15[,i])[1] <- mostCommon
+      }
+    }
+  }
+}
+
+#check if any NA left
+any(is.na(trainClaimsCat15))
+any(is.na(valClaimsCat15))
+any(is.na(testClaimsCat15))
+
+
+#10e. Add target column back to trainClaimsCat15 and valClaimsCat15
+
+trainClaimsCat15$target <- trainClaimsTargets
+trainClaimsCat15 <- trainClaimsCat15[, c(14, 1:13)] #rearranges the target column from last to first. 
+str(trainClaimsCat15)
+
+valClaimsCat15$target <- valClaimsTargets
+valClaimsCat15 <- valClaimsCat15[, c(14, 1:13)] #rearranges the target column from last to first. 
+str(valClaimsCat15)
+
+
+#10f. Add ID column back to testClaimsCategorical15
+
+testClaimsCat15$ID <- testClaimsID
+testClaimsCat15 <- testClaimsCat15[,c(14, 1:13)]
+str(testClaimsCat15)
+
+
+
+
+
+```
+
+#Cleaning up numerical variables in training and test data
+
+11.  Deal with outliers in numeric variables, defined as <5th and >95th percentile for each column
+
+11a. Create a dataframe with only numeric variables from training set. 
+     Select the same variables from validation and test sets.
+     
+     This gives: 57160 obs. of  12 variables in the training set
+                 57161 obs. of 12 variables in the validation set
+                 114393 obs. of  12 variables in the test set. 
+     Store this in trainClaimsNumeric, valClaimsNumeric and testClaimsNumeric. 
+     Remaining variables: v10, v12, v14, v21, v34, v38, v40, v50, v62, v72, v114, v129
+
+11b,c,d. For trainClaimsNumeric, valClaimsNumeric and testClaimsNumeric: 
+           replace outliers with original mean (calculate from remaining values excluding outliers) 
+ 
+
+```{r}
+#11a. Create a dataframe with only numeric variables from training set
+trainClaimsNumeric <- trainClaims %>% select(-factorColNums) #this removes target column too
+valClaimsNumeric <- valClaims %>% select(-factorColNums) #this removes target column too
+testClaimsNumeric <- testClaims %>% select(-factorColNums) #this removes ID column too
+
+#view the new dataframes
+str(trainClaimsNumeric)
+str(valClaimsNumeric)
+str(testClaimsNumeric)
+
+
+
+#11b.Replace outliers with original mean in training data
+for (i in 1:ncol(trainClaimsNumeric)){ #loop all the columns
+  column <- as.numeric(trainClaimsNumeric[,i])
+  outlier <- quantile(column, c(0.05,0.95), na.rm=TRUE) #determine 5th and 95th quantiles
+  notOutlier <- c() #initialize a vector to hold all values between 5th and 95th quantiles
+    
+  for (j in length(trainClaimsNumeric[,i])){ #loop each row in the column
+    if (!is.na(trainClaimsNumeric[j,i])){
+      if (trainClaimsNumeric[j,i] < outlier[1] | trainClaimsNumeric[j,i] > outlier[2]){ #if <5th or >95th quantile, replace with 88888
+        trainClaimsNumeric[j,i] <- 88888
+      }
+      else if(trainClaimsNumeric[j,i] >= outlier[1] & trainClaimsNumeric[j,i] <= outlier[2]){ #if between 5th and 95th percentile, 
+        notOutlier <- c(notOutlier, trainClaimsNumeric[j,i]) #add value to notOutlier
+      }
+    }  
+  }  
+  colMean.no.outlier <- mean(notOutlier) #calculate mean of the normal values
+    
+  for (k in length(trainClaimsNumeric[,i])){ #loop each row in the column again and replace the 88888's with colMean.no.outlier
+    if (!is.na(trainClaimsNumeric[k,i])){
+      if (trainClaimsNumeric[k,i] == 88888){
+        trainClaimsNumeric[k,i] <- colMean.no.outlier
+      } 
+    }
+  }
+}
+
+
+#11c. Replace outliers with original mean in validation data
+for (i in 1:ncol(valClaimsNumeric)){ #loop all the columns
+  column <- as.numeric(valClaimsNumeric[,i])
+  outlier <- quantile(column, c(0.05,0.95), na.rm=TRUE) #determine 5th and 95th quantiles
+  notOutlier <- c() #initialize a vector to hold all values between 5th and 95th quantiles
+    
+  for (j in length(valClaimsNumeric[,i])){ #loop each row in the column
+    if (!is.na(valClaimsNumeric[j,i])){
+      if (valClaimsNumeric[j,i] < outlier[1] | valClaimsNumeric[j,i] > outlier[2]){ #if <5th or >95th quantile, replace with 88888
+        valClaimsNumeric[j,i] <- 88888
+      }
+      else if(valClaimsNumeric[j,i] >= outlier[1] & valClaimsNumeric[j,i] <= outlier[2]){ #if between 5th and 95th percentile, 
+        notOutlier <- c(notOutlier, valClaimsNumeric[j,i]) #add value to notOutlier
+      }
+    }  
+  }
+  colMean.no.outlier <- mean(notOutlier) #calculate mean of the normal values
+    
+  for (k in length(valClaimsNumeric[,i])){ #loop each row in the column again,replace the 88888's with colMean.no.outlier
+    if (!is.na(valClaimsNumeric[k,i])){
+      if (valClaimsNumeric[k,i] == 88888){
+        valClaimsNumeric[k,i] <- colMean.no.outlier
+      } 
+    }
+  }
+}
+
+#11d. Replace outliers with original mean in test data
+for (i in 1:ncol(testClaimsNumeric)){ #loop all the columns
+  column <- as.numeric(testClaimsNumeric[,i])
+  outlier <- quantile(column, c(0.05,0.95), na.rm=TRUE) #determine 5th and 95th quantiles
+  notOutlier <- c() #initialize a vector to hold all values between 5th and 95th quantiles
+    
+  for (j in length(testClaimsNumeric[,i])){ #loop each row in the column
+    if (!is.na(testClaimsNumeric[j,i])){
+      if (testClaimsNumeric[j,i] < outlier[1] | testClaimsNumeric[j,i] > outlier[2]){ #if <5th or >95th quantile, replace with 88888
+        testClaimsNumeric[j,i] <- 88888
+      }
+      else if(testClaimsNumeric[j,i] >= outlier[1] & testClaimsNumeric[j,i] <= outlier[2]){ #if between 5th and 95th percentile, 
+        notOutlier <- c(notOutlier, testClaimsNumeric[j,i]) #add value to notOutlier
+      }
+    }  
+  }
+  colMean.no.outlier <- mean(notOutlier) #calculate mean of the normal values
+    
+  for (k in length(testClaimsNumeric[,i])){ #loop each row in the column again,replace the 88888's with colMean.no.outlier
+    if (!is.na(testClaimsNumeric[k,i])){
+      if (testClaimsNumeric[k,i] == 88888){
+        testClaimsNumeric[k,i] <- colMean.no.outlier
+      } 
+    }
+  }
+}
+
+
+```
+
+12a,b,c.  Replace NA values with final median value for each column in trainClaimsNumeric, valClaimsNumeric and testClaimsNumeric
+
+
+```{r}
+
+#12a.Replace NA values with final column medians for all columns in training data
+for (i in 1:ncol(trainClaimsNumeric)){
+  trainClaimsNumeric[is.na(trainClaimsNumeric[,i]), i] <- median(trainClaimsNumeric[,i], na.rm = TRUE)
+}
+
+#12b.Replace NA values with final column medians for all columns in validation data
+for (i in 1:ncol(valClaimsNumeric)){
+  valClaimsNumeric[is.na(valClaimsNumeric[,i]), i] <- median(valClaimsNumeric[,i], na.rm = TRUE)
+}  
+
+#12c.Replace NA values with final column medians for all columns in test data
+for (i in 1:ncol(testClaimsNumeric)){
+  testClaimsNumeric[is.na(testClaimsNumeric[,i]), i] <- median(testClaimsNumeric[,i], na.rm = TRUE)
+}  
+
+
+
+#check if any NA left:
+any(is.na(trainClaimsNumeric))
+any(is.na(valClaimsNumeric))
+any(is.na(testClaimsNumeric))
+
+#trainClaimsNumeric, valClaimsNumeric and testClaimsNumeric still do not have target and ID columns. 
+#Leave them out to do correlation analysis first
+str(trainClaimsNumeric)
+```
+
+13.  Identify and remove highly correlated numeric variables in numeric training data, 
+     using a pair-wise absolute correlation cutoff of 0.75
+     This identifies v10, v14, v34, v40 as highly correlated.
+     If removed, this leaves 57160 obs of 8 variables (v12,v21,v38,v50,v62,v72,v114,v129) in trainClaimsNumeric
+
+
+13a. Generate correlation matrix for numeric training data
+
+13b. OPTIONAL: Remove highly correlated vars from numeric training data
+
+13c. OPTIONAL: Select the same columns in validation and test data
+
+
+```{r}
+
+#13a.Generate correlation matrix for trainClaimsNumeric
+
+claimsNumericCOR <- trainClaimsNumeric
+correlationMatrix <- cor(claimsNumericCOR[,1:12])
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.75, names = FALSE)
+
+colnames(trainClaimsNumeric[highlyCorrelated])
+
+#13b. Remove highlyCorrelated from trainClaimsNumeric
+#     This gives 8 remaining variables
+
+# trainClaimsNumeric <- claimsNumericCOR %>% select(-highlyCorrelated)
+# claimsNumColsFinal <- colnames(trainClaimsNumeric) #save column names in a vector
+
+
+#13c. Select same columns in validation and test data 
+# valClaimsNumeric <- valClaimsNumeric[claimsNumColsFinal]
+# testClaimsNumeric <- testClaimsNumeric[claimsNumColsFinal]
+
+```
+Dfs have 8 vars if highly correlated vars are removed, and 12 if not removed
+
+13d. Add target column back to numeric training data
+
+13e. Add target column back to numeric validation data, and ID back to numeric test data
+
+```{r}
+
+
+#13d. Add the target column back, rearrange to be first column
+trainClaimsNumeric$target <- trainClaimsTargets
+trainClaimsNumeric <- trainClaimsNumeric[,c(13, 1:12)]
+
+#13e. Add target column back to valClaimsNumeric and ID column to testClaimsNumeric, reorder it to column 1
+valClaimsNumeric$target <- valClaimsTargets
+valClaimsNumeric <- valClaimsNumeric[,c(13, 1:12)]
+
+testClaimsNumeric$ID <- testClaimsID
+testClaimsNumeric <- testClaimsNumeric[,c(13, 1:12)]
+
+#13g. View trainClaimsNumeric, valClaimsNumeric and testClaimsNumeric without highly correlated columns
+str(trainClaimsNumeric)
+str(valClaimsNumeric)
+str(testClaimsNumeric)
+
+
+```
+14a. Plot histograms for the 12 numeric variables in trainClaimsNumeric (including correlated):
+     v10, v12, v14, v21, v34, v38, v40, v50, v62, v72, v114, v129
+
+```{r}
+
+#14a.Plot histograms for each numeric variable in claimsNumeric, choose binwidth for each
+
+v10 <- ggplot(trainClaimsNumeric, aes(x=v10)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v12 <- ggplot(trainClaimsNumeric, aes(x=v12)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v14 <- ggplot(trainClaimsNumeric, aes(x=v14)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+  
+v21 <- ggplot(trainClaimsNumeric, aes(x=v21)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v34 <- ggplot(trainClaimsNumeric, aes(x=v34)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v38 <- ggplot(trainClaimsNumeric, aes(x=v38)) + geom_histogram(aes(fill = target), binwidth = 0.5) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v40 <- ggplot(trainClaimsNumeric, aes(x=v40)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v50 <- ggplot(trainClaimsNumeric, aes(x=v50)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v62 <- ggplot(trainClaimsNumeric, aes(x=v62)) + geom_histogram(aes(fill = target), binwidth = 1) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v72 <- ggplot(trainClaimsNumeric, aes(x=v72)) + geom_histogram(aes(fill = target), binwidth = 1) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v114 <- ggplot(trainClaimsNumeric, aes(x=v114)) + geom_histogram(aes(fill = target), binwidth = 0.25) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v129 <- ggplot(trainClaimsNumeric, aes(x=v129)) + geom_histogram(aes(fill = target), binwidth = 1) + facet_grid(target ~ .) + theme(legend.position="none")
+
+#print histograms for all 12 numeric variables 
+grid.arrange(v10, v12, v14, v21, v34, v38, v40, v50, v62, v72, v114, v129, ncol = 3)
+
+#print histograms of only the 8 remaining variables after correlation analysis
+#grid.arrange(v12, v21, v38, v50, v62, v72, v114, v129, ncol = 3)
+
+```
+14b. Plot histograms for categorical variables with <=15 levels in trainClaimsCat15
+     v3, v24, v30, v31, v47, v52, v66, v71, v74, v75, v91, v107, v110
+
+```{r}
+#14b. Plot bar charts for each categorical variable in trainClaimsCat15
+
+v3 <- ggplot(trainClaimsCat15, aes(x = v3)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v24 <- ggplot(trainClaimsCat15, aes(x = v24)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v30 <- ggplot(trainClaimsCat15, aes(x = v30)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v31 <- ggplot(trainClaimsCat15, aes(x = v31)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v47 <- ggplot(trainClaimsCat15, aes(x = v47)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v52 <- ggplot(trainClaimsCat15, aes(x = v52)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v66 <- ggplot(trainClaimsCat15, aes(x = v66)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v71 <- ggplot(trainClaimsCat15, aes(x = v71)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v74 <- ggplot(trainClaimsCat15, aes(x = v74)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v75 <- ggplot(trainClaimsCat15, aes(x = v75)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v91 <- ggplot(trainClaimsCat15, aes(x = v91)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v107 <- ggplot(trainClaimsCat15, aes(x = v107)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+v110 <- ggplot(trainClaimsCat15, aes(x = v110)) + geom_bar(aes(fill = target)) + facet_grid(target ~ .) + theme(legend.position="none")
+
+grid.arrange(v3, v24, v30, v31, v47, v52, v66, v71, v74, v75, v91, v107, v110, ncol = 3)
+
+
+```
+
+15. Merge numeric and categorical variables back together:
+    trainClaimsFinal - 57160 obs. of 26 variables incl target
+    valClaimsFinal - 57161 obs. of 26 variables incl target
+    testClaimsFinal - 114393 obs. of 26 variables incl ID
+    
+    Remaining variables: 
+    v12, v12, v14, v21, v34, v38, v40, v50, v62, v72, v114, v129
+    v3, v24, v30, v31, v47, v52, v66, v71, v74, v75, v91, v107, v110
+
+    Correlated variables were not removed
+    
+```{r}
+
+#trainClaimsFinal
+trainClaimsCat15 <- trainClaimsCat15[2:14] #remove target column from cat15
+trainClaimsFinal <- cbind(trainClaimsNumeric, trainClaimsCat15)
+
+#valClaimsFinal
+valClaimsCat15 <- valClaimsCat15[2:14] #remove target column from cat15
+valClaimsFinal <- cbind(valClaimsNumeric,valClaimsCat15)
+
+#testClaimsFinal
+testClaimsCat15 <- testClaimsCat15[2:14] #remove ID column from cat15
+testClaimsFinal <- cbind(testClaimsNumeric, testClaimsCat15)
+
+str(trainClaimsFinal)
+str(valClaimsFinal)
+str(testClaimsFinal)
+
+#write.csv(trainClaimsFinal, file = "trainClaimsClean.csv", row.names=FALSE)
+
+
+
+```
+
+#16. Check for near zero variance predictors using nearZeroVar() from caret package
+
+There are no zero variance predictors, but there are 3 variables with < 10% unique values
+
+    freqRatio percentUnique zeroVar  nzv				
+v38  52.42693   0.020993702   FALSE TRUE				
+v3  504.65487   0.005248425   FALSE TRUE				
+v74 153.00000   0.005248425   FALSE TRUE				
+
+
+```{r}
+trainClaimsFinalVar <- nearZeroVar(trainClaimsFinal, saveMetrics = TRUE)
+str(trainClaimsFinalVar)
+
+#View near zero var predictors
+trainClaimsFinalVar[trainClaimsFinalVar[,"zeroVar"] + trainClaimsFinalVar[,"nzv"] > 0,]
+
+```
+#Based only on numeric variables in claimsNumeric, perform variable screening by Information Value using Information package
+
+##Without highly correlated numeric variables
+Variable	IV
+
+v50	    0.46078426
+v129	  0.17578331
+v62	    0.15019944
+v12	    0.08555659
+v21	    0.08513701
+v38	    0.0543484
+v114	  0.03370896
+v72	    0.02830984
+
+##With highly correlated numeric variables
+Variable	IV
+
+v50	    0.46078426
+v129	  0.17578331
+v10	    0.16512801
+v62	    0.15019944
+v14	    0.13765286
+v12	    0.08555659
+v21	    0.08513701
+v34	    0.05674745
+v38	    0.0543484
+v114	  0.03370896
+v72	    0.02830984
+v40	    0.01364609
+
+
+```{r}
+
+IV <- Information::create_infotables(data=trainClaimsNumeric, y="target")
+IVTable <- tbl_df(IV$Summary)
+print(IVTable)
+
+#Visualize WOE
+plot_infotables(IV, IV$Summary$Variable[1:9], same_scales = FALSE)
+
+
+
+
+```
+#Using both numeric and categorical variables in trainClaimsFinal, perform variable screening by Information Value using Information package
+
+##Without highly correlated numeric variables:
+Top 15 by IV
+Variable  IV 
+v50	    0.46078430
+v31	    0.23007160
+v129	  0.17578330
+v47	    0.15995130
+v110	  0.15103240
+v62	    0.15019940
+v66	    0.12845110
+v12	    0.08555659
+v21	    0.08513701
+v38	    0.05434840
+v114	  0.03370896
+v72	    0.02830984
+v24	    0.01337383
+v30	    0.01130699
+v74	    0.00765538
+	
+##With highly correlated numeric variables:
+Top 15 by IV
+Variable	IV
+v50	    0.46078430
+v31	    0.23007160
+v129	  0.17578330
+v10	    0.16512800
+v47	    0.15995130
+v110	  0.15103240
+v62	    0.15019940
+v14	    0.13765290
+v66	    0.12845110
+v12	    0.08555659
+v21	    0.08513701
+v34	    0.05674745
+v38	    0.05434840
+v114	  0.03370896
+v72	    0.02830984
+
+	
+
+```{r}
+
+IV2 <- Information::create_infotables(data=trainClaimsFinal, y="target")
+IVTable2 <- tbl_df(IV2$Summary)
+print(IVTable2)
+
+```
+
+
+#Build a logistic regression model based on variables selected by IV value 
+
+
+```{r}
+
+#Build the model(ENTER independent variables, data. Change model name if needed)
+claimsLogModel = glm(target ~ v50 + v31 + v129 + v47 + v66,  data=trainClaimsFinal, family=binomial)
+summary(claimsLogModel)
+
+#Log5bNumCat = glm(target ~ v50 + v31 + v129 + v47 + v66,  data=trainClaimsFinal, family=binomial)
+#Log6NumCat = glm(target ~ v50 + v31 + v129 + v47 + v62 + v66,  data=trainClaimsFinal, family=binomial)
+#Log8NumCat = glm(target ~ v50 + v31 + v129 + v47 + v66 + v10 + v14,  data=trainClaimsFinal, family=binomial)
+
+#Make predictions on validation set
+predictClaims = predict(claimsLogModel, type = "response", newdata = valClaimsFinal)
+summary(predictClaims)
+
+
+#ROC
+ROCRpred = prediction(predictClaims, valClaimsFinal$target)
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,0.1), text.adj=c(-0.2,1.7))
+
+#calculate AUC for this ROC curve
+cat("AUC: ", as.numeric(performance(ROCRpred, "auc")@y.values))
+
+
+#use Effects package to plot predicted values
+plot(allEffects(claimsLogModel))
+
+#Determine variable importance
+varImp(claimsLogModel)
+
+
+#Determine if Log6NumCat provides a better fit than Log5bNumCat with a Likelihood ratio test
+#anova(Log6NumCat, Log5bNumCat, test="Chisq")
+
+
+```
+
+#Predict the probability of accelerated approval for each ID in the test set 
+
+
+```{r}
+#predict probabilities(ENTER model name, newdata)
+predictTestClaims = predict(claimsLogModel, type="response", newdata=testClaimsFinal)
+#convert probabilities to numeric vector
+probs <- as.numeric(predictTestClaims)
+
+#attach the probabilities to the testID (ENTER df name)
+log5bNumCat <- data.frame(ID=testClaimsID, predictedProb=probs)
+#output the results of the logistic regression model as a .csv file (ENTER df name and file)
+write.csv(log5bNumCat, file = "Log5bNumCat.csv", row.names=FALSE)
+
+
+```
+
+
+
